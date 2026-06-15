@@ -1,0 +1,13 @@
+--- /admin/upload endpoint hit, filename=ANNIE.docx ---
+Read 33029 bytes from uploaded file
+=== ingest_document called for 'ANNIE.docx' (33029 bytes) ===
+Extracted text length: 20382
+Split into 52 chunks
+Generated 52 embeddings, dim=1536
+Prepared 52 rows for insert
+Deleted old chunks for source_file='ANNIE.docx'
+Supabase batch 1: inserted 20/20 rows
+Supabase batch 2: inserted 20/20 rows
+Supabase batch 3: inserted 12/12 rows
+Supabase insert SUCCESS: 52 total rows inserted
+ingest_document returned: 52
