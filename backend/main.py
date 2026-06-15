@@ -1,4 +1,9 @@
 import logging
+import sys
+import os
+
+# Ensure the backend directory is in the Python path for Vercel
+sys.path.insert(0, os.path.dirname(__file__))
 
 # Configure logging so we see info/warning/error messages in the terminal
 logging.basicConfig(
