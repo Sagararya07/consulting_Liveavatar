@@ -35,5 +35,17 @@ if not _supabase_key_looks_valid(SUPABASE_SERVICE_KEY):
         "Set the service_role key from Supabase -> Project Settings -> API."
     )
 
-anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+try:
+    anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+except Exception as e:
+    logger.error(f"Failed to initialize Anthropic client: {e}")
+    anthropic_client = None
+
+try:
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    else:
+        supabase = None
+except Exception as e:
+    logger.error(f"Failed to initialize Supabase client: {e}")
+    supabase = None
