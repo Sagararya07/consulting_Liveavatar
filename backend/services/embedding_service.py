@@ -1,14 +1,11 @@
-import asyncio
-
+import httpx
 import numpy as np
-from huggingface_hub import InferenceClient
 
 from config import HF_API_KEY, HF_EMBEDDING_MODEL
 
 EMBEDDING_DIM = 1536
 
-client = InferenceClient(token=HF_API_KEY)
-
+HF_API_URL = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{HF_EMBEDDING_MODEL}"
 
 def _to_vectors(result) -> list[list[float]]:
     arr = np.array(result, dtype=float)
@@ -16,29 +13,27 @@ def _to_vectors(result) -> list[list[float]]:
         return [arr.tolist()]
     return [row.tolist() for row in arr]
 
-
 def _pad_to_dim(vector: list[float]) -> list[float]:
     if len(vector) >= EMBEDDING_DIM:
         return vector[:EMBEDDING_DIM]
     return vector + [0.0] * (EMBEDDING_DIM - len(vector))
 
-
 async def embed_text(text: str) -> list[float]:
-    result = await asyncio.to_thread(
-        client.feature_extraction,
-        text,
-        model=HF_EMBEDDING_MODEL,
-    )
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"} if HF_API_KEY else {}
+    async with httpx.AsyncClient() as client:
+        res = await client.post(HF_API_URL, headers=headers, json={"inputs": text})
+        if res.status_code != 200:
+            raise Exception(f"HF API Error: {res.status_code} - {res.text}")
+        result = res.json()
     return _pad_to_dim(_to_vectors(result)[0])
-
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-
-    result = await asyncio.to_thread(
-        client.feature_extraction,
-        texts,
-        model=HF_EMBEDDING_MODEL,
-    )
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"} if HF_API_KEY else {}
+    async with httpx.AsyncClient() as client:
+        res = await client.post(HF_API_URL, headers=headers, json={"inputs": texts})
+        if res.status_code != 200:
+            raise Exception(f"HF API Error: {res.status_code} - {res.text}")
+        result = res.json()
     return [_pad_to_dim(vec) for vec in _to_vectors(result)]
