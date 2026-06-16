@@ -52,7 +52,7 @@ async def save_session_summary(user_id: str, conversation_text: str) -> None:
     summary = "Mock summary of the conversation."
     try:
         message = await anthropic_client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-3-5-sonnet-20240620",
             max_tokens=300,
             system=(
                 "You are a memory assistant. Given a conversation between a user and an AI avatar, "
