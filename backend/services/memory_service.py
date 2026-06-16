@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from config import supabase, anthropic_client
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ def get_or_create_user(user_id: str, name: str = None, email: str = None) -> dic
         return new_user
 
 
-def fetch_past_summary(user_id: str) -> str | None:
+def fetch_past_summary(user_id: str) -> Optional[str]:
     try:
         result = (
             supabase.table("conversations")

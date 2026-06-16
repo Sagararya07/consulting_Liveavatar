@@ -21,7 +21,9 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
-def _supabase_key_looks_valid(key: str | None) -> bool:
+from typing import Optional
+
+def _supabase_key_looks_valid(key: Optional[str]) -> bool:
     if not key:
         return False
     parts = key.split(".")
