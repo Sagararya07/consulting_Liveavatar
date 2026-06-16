@@ -22,7 +22,7 @@ app = FastAPI(title="LiveAvatar Consulting API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # update for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,7 +42,7 @@ def health():
 @app.get("/debug-config")
 def debug_config():
     import os
-    from config import SUPABASE_URL, SUPABASE_SERVICE_KEY, HF_API_KEY
+    from config import SUPABASE_URL, SUPABASE_SERVICE_KEY, HF_API_KEY, ANTHROPIC_API_KEY, anthropic_client
     return {
         "ENV_SUPABASE_URL": os.getenv("SUPABASE_URL"),
         "ENV_SUPABASE_SERVICE_KEY_LEN": len(os.getenv("SUPABASE_SERVICE_KEY", "")),
@@ -50,6 +50,8 @@ def debug_config():
         "CONFIG_SUPABASE_URL": SUPABASE_URL,
         "CONFIG_SUPABASE_SERVICE_KEY_PREFIX": SUPABASE_SERVICE_KEY[:10] if SUPABASE_SERVICE_KEY else None,
         "CONFIG_HF_API_KEY_PREFIX": HF_API_KEY[:10] if HF_API_KEY else None,
+        "CONFIG_ANTHROPIC_API_KEY_SET": bool(ANTHROPIC_API_KEY),
+        "CONFIG_ANTHROPIC_CLIENT_OK": anthropic_client is not None,
     }
 
 
