@@ -14,7 +14,10 @@ if env_path.exists():
 
 def get_env_stripped(key: str, default: Optional[str] = None) -> Optional[str]:
     val = os.getenv(key, default)
-    return val.strip() if val else val
+    if not val:
+        return val
+    # Strip whitespace, then strip any accidental surrounding quotes
+    return val.strip().strip('"').strip("'")
 
 # HuggingFace configs
 HF_API_KEY = get_env_stripped("HF_API_KEY")
