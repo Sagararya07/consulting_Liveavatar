@@ -92,6 +92,10 @@ export default function AvatarConsultant() {
         setStarted(true);
         setLoading(false);
         setStatus("Avatar ready. Ask your question.");
+
+        session.repeat(
+          "Hello, I'm Annie. I help organizations explore AI automation, marketing and sales systems, AI agents, revenue operations, and business growth opportunities. How may I assist you today?"
+        );
       });
 
       session.on(AgentEventsEnum.USER_TRANSCRIPTION, async (event) => {
