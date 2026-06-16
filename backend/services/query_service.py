@@ -16,7 +16,7 @@ async def answer_query(user_id: str, query: str, language: str = "en") -> str:
         logger.info(f"Generated query embedding, dim={len(query_embedding)}")
     except Exception as e:
         logger.error(f"Failed to generate embedding: {e}")
-        return "I apologize, but I am currently having trouble processing queries due to a backend service error."
+        return f"I apologize, but I am currently having trouble generating embeddings: {e}"
 
     if supabase is not None:
         try:
