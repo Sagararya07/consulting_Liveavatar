@@ -77,7 +77,7 @@ Keep answers concise and conversational — they will be spoken aloud by an avat
 
     try:
         response = await anthropic_client.messages.create(
-            model="claude-haiku-4-5-20250414",
+            model="claude-haiku-4-5-20251001",
             max_tokens=512,
             system=system_prompt,
             messages=[
