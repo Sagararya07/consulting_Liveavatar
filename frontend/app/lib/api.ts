@@ -25,13 +25,22 @@ export async function askQuery(
   query: string,
   language = "en"
 ): Promise<string> {
-  const res = await fetch(`${API_URL}/query/ask`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, query, language }),
-  });
-  const data = await res.json();
-  return data.answer as string;
+  try {
+    const res = await fetch(`${API_URL}/query/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, query, language }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("Backend askQuery error:", data);
+      return `Sorry, I encountered an internal server error: ${data.detail || res.statusText}`;
+    }
+    return data.answer as string;
+  } catch (err: any) {
+    console.error("askQuery fetch error:", err);
+    return "I am having trouble connecting to my server right now.";
+  }
 }
 
 export async function endSession(
