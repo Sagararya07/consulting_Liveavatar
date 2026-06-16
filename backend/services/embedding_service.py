@@ -18,22 +18,21 @@ def _pad_to_dim(vector: list[float]) -> list[float]:
         return vector[:EMBEDDING_DIM]
     return vector + [0.0] * (EMBEDDING_DIM - len(vector))
 
-async def embed_text(text: str) -> list[float]:
+def _sync_embed(text_or_texts):
     headers = {"Authorization": f"Bearer {HF_API_KEY}"} if HF_API_KEY else {}
-    async with httpx.AsyncClient() as client:
-        res = await client.post(HF_API_URL, headers=headers, json={"inputs": text})
-        if res.status_code != 200:
-            raise Exception(f"HF API Error: {res.status_code} - {res.text}")
-        result = res.json()
+    res = httpx.post(HF_API_URL, headers=headers, json={"inputs": text_or_texts}, timeout=30.0)
+    if res.status_code != 200:
+        raise Exception(f"HF API Error: {res.status_code} - {res.text}")
+    return res.json()
+
+async def embed_text(text: str) -> list[float]:
+    import asyncio
+    result = await asyncio.to_thread(_sync_embed, text)
     return _pad_to_dim(_to_vectors(result)[0])
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"} if HF_API_KEY else {}
-    async with httpx.AsyncClient() as client:
-        res = await client.post(HF_API_URL, headers=headers, json={"inputs": texts})
-        if res.status_code != 200:
-            raise Exception(f"HF API Error: {res.status_code} - {res.text}")
-        result = res.json()
+    import asyncio
+    result = await asyncio.to_thread(_sync_embed, texts)
     return [_pad_to_dim(vec) for vec in _to_vectors(result)]
