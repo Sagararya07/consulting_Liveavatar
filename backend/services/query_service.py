@@ -11,8 +11,12 @@ TOP_K = 5
 
 async def answer_query(user_id: str, query: str, language: str = "en") -> str:
     chunks = []
-    query_embedding = await embed_text(query)
-    logger.info(f"Generated query embedding, dim={len(query_embedding)}")
+    try:
+        query_embedding = await embed_text(query)
+        logger.info(f"Generated query embedding, dim={len(query_embedding)}")
+    except Exception as e:
+        logger.error(f"Failed to generate embedding: {e}")
+        return "I apologize, but I am currently having trouble processing queries due to a backend service error."
 
     if supabase is not None:
         try:

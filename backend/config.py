@@ -1,27 +1,34 @@
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-# Load the unified .env from the project root (one level up from /backend)
-_root_env = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(_root_env)
+# Try to load .env from the project root if running locally
+env_path = Path(__file__).resolve().parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+
+def get_env_stripped(key: str, default: Optional[str] = None) -> Optional[str]:
+    val = os.getenv(key, default)
+    return val.strip() if val else val
+
+# HuggingFace configs
+HF_API_KEY = get_env_stripped("HF_API_KEY")
+HF_EMBEDDING_MODEL = get_env_stripped("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
+# Anthropic
+ANTHROPIC_API_KEY = get_env_stripped("ANTHROPIC_API_KEY")
+
+# Supabase
+SUPABASE_URL = get_env_stripped("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = get_env_stripped("SUPABASE_SERVICE_KEY")
+
 
 logger = logging.getLogger(__name__)
-
-HF_API_KEY = os.getenv("HF_API_KEY")
-HF_EMBEDDING_MODEL = os.getenv(
-    "HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-)
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-
-
-from typing import Optional
 
 def _supabase_key_looks_valid(key: Optional[str]) -> bool:
     if not key:
