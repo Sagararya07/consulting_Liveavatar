@@ -20,8 +20,11 @@ export async function login(email: string, password: string) {
     // Backend/proxy may return plain text/HTML errors. Avoid res.json() to prevent:
     // "Unexpected token 'A', ... is not valid JSON"
     const errText = await res.text().catch(() => "");
+    const message = errText.trim();
     throw new Error(
-      errText.trim() || `Login failed (${res.status} ${res.statusText})`
+      message
+        ? message
+        : `Login failed (${res.status} ${res.statusText || ""})`
     );
   }
 
