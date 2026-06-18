@@ -15,10 +15,19 @@ export async function login(email: string, password: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.detail || "Login failed");
-  return data;
+
+  if (!res.ok) {
+    // Backend/proxy may return plain text/HTML errors. Avoid res.json() to prevent:
+    // "Unexpected token 'A', ... is not valid JSON"
+    const errText = await res.text().catch(() => "");
+    throw new Error(
+      errText.trim() || `Login failed (${res.status} ${res.statusText})`
+    );
+  }
+
+  return res.json();
 }
+
 
 export async function registerUser(name: string, email: string, password: string) {
   const res = await fetch(`${API_URL}/auth/register`, {
