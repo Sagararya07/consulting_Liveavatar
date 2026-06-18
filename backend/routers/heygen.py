@@ -23,7 +23,6 @@ from typing import Optional
 class TokenRequest(BaseModel):
     avatar_id: Optional[str] = None
     voice_id: Optional[str] = None
-    language: Optional[str] = "en"
 
 
 async def _liveavatar_get(path: str, *, require_api_key: bool = True) -> dict:
@@ -81,8 +80,14 @@ async def get_avatar(avatar_id: str):
     }
 
 
+from middleware.auth_middleware import get_current_user
+from fastapi import Depends
+
 @router.post("/token")
-async def create_streaming_token(req: TokenRequest = TokenRequest()):
+async def create_streaming_token(
+    req: TokenRequest = TokenRequest(),
+    current_user: dict = Depends(get_current_user)
+):
     """
     Call HeyGen's LiveAvatar /v1/sessions/token endpoint and return
     the short-lived session token to the frontend.
@@ -95,7 +100,6 @@ async def create_streaming_token(req: TokenRequest = TokenRequest()):
 
     avatar_id = req.avatar_id or "dd73ea75-1218-4ef3-92ce-606d5f7fbc0a"
     voice_id = req.voice_id or "c2527536-6d1f-4412-a643-53a3497dada9"
-    language = req.language or "en"
 
     url = "https://api.liveavatar.com/v1/sessions/token"
     payload = {
@@ -103,7 +107,6 @@ async def create_streaming_token(req: TokenRequest = TokenRequest()):
         "avatar_id": avatar_id,
         "avatar_persona": {
             "voice_id": voice_id,
-            "language": language,
         }
     }
 

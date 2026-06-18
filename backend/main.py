@@ -16,7 +16,7 @@ logging.basicConfig(
 import config  # noqa: E402,F401 — must be imported first to load .env
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, users, query, heygen
+from routers import admin, users, query, heygen, auth, conversations, scheduling
 
 app = FastAPI(title="LiveAvatar Consulting API", version="1.0.0")
 
@@ -28,10 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(users.router)
 app.include_router(query.router)
 app.include_router(heygen.router)
+app.include_router(conversations.router)
+app.include_router(scheduling.router)
 
 
 @app.get("/health")

@@ -6,15 +6,19 @@ import {
   SessionEvent,
   AgentEventsEnum,
 } from "@heygen/liveavatar-web-sdk";
-import { getOrCreateUserId } from "../lib/identity";
+import { useAuth } from "../lib/AuthContext";
 import {
-  identifyUser,
   askQuery,
+  bookMeeting,
   endSession,
   getHeygenToken,
   getAvatarPreview,
   getLanguages,
+  getSettings,
+  getUserTimezone,
   type LiveAvatarLanguage,
+  type MeetingSlot,
+  type QueryResult,
 } from "../lib/api";
 
 const AVATAR_ID = process.env.NEXT_PUBLIC_HEYGEN_AVATAR_ID;
@@ -26,6 +30,7 @@ const FALLBACK_LANGUAGES: LiveAvatarLanguage[] = [
 ];
 
 export default function AvatarConsultant() {
+  const { user, token, logout } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const avatarRef = useRef<LiveAvatarSession | null>(null);
 
@@ -38,17 +43,18 @@ export default function AvatarConsultant() {
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [languages, setLanguages] = useState<LiveAvatarLanguage[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState("multi");
+  const [leadState, setLeadState] = useState<Pick<QueryResult, "intent" | "lead_score" | "stage" | "status" | "score_delta"> | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<MeetingSlot[]>([]);
+  const [slotTimezone, setSlotTimezone] = useState("");
+  const [bookingSlotId, setBookingSlotId] = useState<string | null>(null);
 
-  const userId = useRef<string>("");
-  // transcript stores turn pairs for end-of-session summary
-  const transcript = useRef<{ role: string; text: string }[]>([]);
+  const userTimezone = useRef(getUserTimezone());
 
-  // ── Init user identity, avatar preview, languages ───
+  // Keep track of conversation ID returned from the backend
+  const conversationId = useRef<string>("");
+
+  // ── Init avatar preview, languages ───
   useEffect(() => {
-    const id = getOrCreateUserId();
-    userId.current = id;
-    identifyUser(id).catch(console.error);
-
     if (AVATAR_ID) {
       getAvatarPreview(AVATAR_ID)
         .then((avatar) => setAvatarPreviewUrl(avatar.preview_url))
@@ -60,15 +66,66 @@ export default function AvatarConsultant() {
       .catch(console.error);
   }, []);
 
+  // ── Apply consultant turn result to UI state ────────
+  const applyQueryResult = useCallback((result: QueryResult) => {
+    if (result.conversation_id) conversationId.current = result.conversation_id;
+    setLeadState({
+      intent: result.intent,
+      lead_score: result.lead_score,
+      stage: result.stage,
+      status: result.status,
+      score_delta: result.score_delta,
+    });
+    if (result.ui_action?.type === "show_slots" && result.ui_action.slots?.length) {
+      setAvailableSlots(result.ui_action.slots);
+      setSlotTimezone(result.ui_action.timezone || userTimezone.current);
+    } else if (result.intent !== "book_meeting") {
+      setAvailableSlots([]);
+    }
+    return result.answer;
+  }, []);
+
+  const handleBookSlot = useCallback(async (slot: MeetingSlot) => {
+    if (!token || !conversationId.current || bookingSlotId) return;
+    setBookingSlotId(slot.id);
+    setStatus("Booking your meeting…");
+
+    try {
+      const result = await bookMeeting(token, {
+        conversation_id: conversationId.current,
+        slot_id: slot.id,
+        slot_start: slot.start,
+        slot_end: slot.end,
+        timezone: slot.timezone || slotTimezone || userTimezone.current,
+        attendee_name: user?.name,
+        attendee_email: user?.email,
+      });
+
+      setAvailableSlots([]);
+      setLeadState((prev) => prev ? { ...prev, stage: result.stage, status: result.status, intent: "rag_answer" } : prev);
+      avatarRef.current?.repeat(result.message);
+      setStatus("Meeting booked!");
+    } catch (err) {
+      console.error(err);
+      setStatus("Could not book that slot. Please try another.");
+    } finally {
+      setBookingSlotId(null);
+    }
+  }, [token, user, slotTimezone, bookingSlotId]);
+
   // ── Start avatar session ────────────────────────────
   const startSession = useCallback(async () => {
+    if (!user || !token) return;
     setLoading(true);
     setErrorMsg("");
     setStatus("Requesting session token…");
+    conversationId.current = ""; // reset for new session
+    setLeadState(null);
+    setAvailableSlots([]);
 
-    let token: string;
+    let heygenToken: string;
     try {
-      token = await getHeygenToken(AVATAR_ID, VOICE_ID, selectedLanguage);
+      heygenToken = await getHeygenToken(token, AVATAR_ID, VOICE_ID, selectedLanguage);
     } catch (err: any) {
       setLoading(false);
       setErrorMsg(err.message || "Failed to get session token");
@@ -79,7 +136,7 @@ export default function AvatarConsultant() {
     setStatus("Starting avatar session…");
 
     try {
-      const session = new LiveAvatarSession(token, {
+      const session = new LiveAvatarSession(heygenToken, {
         voiceChat: true,
       });
       avatarRef.current = session;
@@ -99,17 +156,24 @@ export default function AvatarConsultant() {
         if (!spokenText.trim()) return;
 
         setStatus("Processing…");
-        transcript.current.push({ role: "user", text: spokenText });
 
-        const answer = await askQuery(
-          userId.current,
-          spokenText,
-          selectedLanguage
-        );
-        transcript.current.push({ role: "assistant", text: answer });
+        try {
+          const result = await askQuery(
+            user.id,
+            spokenText,
+            selectedLanguage,
+            conversationId.current || undefined,
+            token,
+            userTimezone.current
+          );
+          const answer = applyQueryResult(result);
 
-        session.repeat(answer);
-        setStatus("Avatar ready. Ask your question.");
+          session.repeat(answer);
+          setStatus("Avatar ready. Ask your question.");
+        } catch (err) {
+          console.error(err);
+          setStatus("Error getting response.");
+        }
       });
 
       session.on(SessionEvent.SESSION_DISCONNECTED, () => {
@@ -121,43 +185,59 @@ export default function AvatarConsultant() {
       setIsListening(true);
 
       // Speak welcome dialogue once fully connected
-      session.repeat(
-        "Hello, I'm Annie. I help organizations explore AI automation, marketing and sales systems, AI agents, revenue operations, and business growth opportunities. How may I assist you today?"
-      );
+      try {
+        const settings = await getSettings();
+        let intro = settings.avatar_intro || "Hello, I am ready to assist you.";
+        // Replace variables
+        intro = intro.replace("{user_name}", user.name || "friend");
+        intro = intro.replace("{avatar_name}", settings.avatar_name || "Annie");
+        session.repeat(intro);
+      } catch (e) {
+        // Fallback if settings fail
+        session.repeat(`Hello ${user.name}, how may I assist you today?`);
+      }
     } catch (err: any) {
       setLoading(false);
       setErrorMsg(err.message || "Failed to start avatar session");
       setStatus("");
       avatarRef.current = null;
     }
-  }, [selectedLanguage]);
+  }, [selectedLanguage, user, token, applyQueryResult]);
 
   // ── Send typed message ──────────────────────────────
   const sendText = useCallback(async () => {
     const text = userInput.trim();
-    if (!text || !avatarRef.current) return;
+    if (!text || !avatarRef.current || !user || !token) return;
 
     setUserInput("");
     setStatus("Processing…");
-    transcript.current.push({ role: "user", text });
 
-    const answer = await askQuery(userId.current, text, selectedLanguage);
-    transcript.current.push({ role: "assistant", text: answer });
+    try {
+      const result = await askQuery(
+        user.id,
+        text,
+        selectedLanguage,
+        conversationId.current || undefined,
+        token,
+        userTimezone.current
+      );
+      const answer = applyQueryResult(result);
 
-    avatarRef.current.repeat(answer);
-    setStatus("Avatar ready. Ask your question.");
-  }, [userInput, selectedLanguage]);
+      avatarRef.current.repeat(answer);
+      setStatus("Avatar ready. Ask your question.");
+    } catch (err) {
+      console.error(err);
+      setStatus("Error getting response.");
+    }
+  }, [userInput, selectedLanguage, user, token, applyQueryResult]);
 
   // ── End session ─────────────────────────────────────
   const stopSession = useCallback(async () => {
-    if (!avatarRef.current) return;
+    if (!avatarRef.current || !token) return;
 
-    // Save memory summary
-    if (transcript.current.length > 0) {
-      const flat = transcript.current
-        .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`)
-        .join("\n");
-      await endSession(userId.current, flat).catch(console.error);
+    // Save memory summary if we have a conversation ID
+    if (conversationId.current) {
+      await endSession(conversationId.current, token).catch(console.error);
     }
 
     await avatarRef.current.stop();
@@ -165,7 +245,7 @@ export default function AvatarConsultant() {
     setStarted(false);
     setIsListening(false);
     setStatus("Session ended. Your conversation has been saved.");
-  }, []);
+  }, [token]);
 
   // ── Keyboard submit ──────────────────────────────────
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -177,6 +257,15 @@ export default function AvatarConsultant() {
 
   return (
     <div style={styles.wrapper}>
+      {/* Top Header / Profile */}
+      <div style={styles.header}>
+        <div style={styles.userInfo}>
+          <div style={styles.avatarCircle}>{user?.name?.[0]?.toUpperCase()}</div>
+          <span style={styles.userName}>{user?.name}</span>
+        </div>
+        <button onClick={logout} style={styles.logoutBtn}>Logout</button>
+      </div>
+
       <div style={styles.videoBox}>
         <video ref={videoRef} autoPlay playsInline style={styles.video} />
         
@@ -190,11 +279,6 @@ export default function AvatarConsultant() {
                 style={styles.backgroundImage}
               />
             )}
-
-            {/* Top Right Close Button */}
-            <button onClick={() => window.close()} style={styles.closeBtn}>
-              ✕
-            </button>
 
             {/* Bottom floating control card */}
             <div style={styles.floatingCard}>
@@ -234,7 +318,42 @@ export default function AvatarConsultant() {
             <p style={styles.statusText}>{status}</p>
           </div>
         )}
+
+        {started && availableSlots.length > 0 && (
+          <div style={styles.slotOverlay}>
+            <p style={styles.slotTitle}>Pick a time ({slotTimezone || userTimezone.current})</p>
+            <div style={styles.slotList}>
+              {availableSlots.map((slot) => (
+                <button
+                  key={slot.id}
+                  style={styles.slotBtn}
+                  disabled={bookingSlotId === slot.id}
+                  onClick={() => handleBookSlot(slot)}
+                >
+                  {bookingSlotId === slot.id ? "Booking…" : slot.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {started && leadState && (
+        <div style={styles.leadPanel}>
+          <span style={styles.leadLabel}>Consultant</span>
+          <span style={styles.leadChip}>{leadState.stage}</span>
+          <span style={{
+            ...styles.leadChip,
+            color: leadState.status === "hot" ? "#ff9f43" : leadState.status === "warm" ? "#ffd166" : "#aaa",
+          }}>
+            {leadState.status} · {leadState.lead_score}
+          </span>
+          <span style={styles.leadChip}>{leadState.intent.replace("_", " ")}</span>
+          {leadState.score_delta > 0 && (
+            <span style={styles.leadDelta}>+{leadState.score_delta}</span>
+          )}
+        </div>
+      )}
 
       {started && (
         <div style={styles.controls}>
@@ -275,6 +394,44 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#0f0f0f",
     color: "#fff",
   },
+  header: {
+    width: "100%",
+    maxWidth: 720,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  userInfo: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  avatarCircle: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    background: "linear-gradient(135deg, #6c47ff, #b647ff)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "1.2rem",
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  userName: {
+    fontSize: "1rem",
+    fontWeight: 500,
+  },
+  logoutBtn: {
+    background: "transparent",
+    border: "1px solid #444",
+    color: "#ccc",
+    padding: "6px 16px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "0.85rem",
+    transition: "background 0.2s",
+  },
   videoBox: {
     position: "relative",
     width: "100%",
@@ -304,25 +461,6 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     height: "100%",
     objectFit: "cover",
-  },
-  closeBtn: {
-    position: "absolute",
-    top: "16px",
-    right: "16px",
-    width: "36px",
-    height: "36px",
-    borderRadius: "50%",
-    background: "#121212",
-    color: "#d4af37",
-    border: "1px solid rgba(212, 175, 55, 0.3)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    fontSize: "14px",
-    fontWeight: "bold",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-    zIndex: 5,
   },
   floatingCard: {
     position: "absolute",
@@ -443,5 +581,67 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontSize: 13,
     alignSelf: "flex-start",
+  },
+  leadPanel: {
+    width: "100%",
+    maxWidth: 720,
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 14px",
+    background: "rgba(108, 71, 255, 0.08)",
+    border: "1px solid rgba(108, 71, 255, 0.2)",
+    borderRadius: 10,
+    fontSize: 12,
+  },
+  leadLabel: {
+    color: "#888",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginRight: 4,
+  },
+  leadChip: {
+    background: "rgba(255,255,255,0.06)",
+    padding: "3px 10px",
+    borderRadius: 6,
+    color: "#ccc",
+    textTransform: "capitalize",
+  },
+  leadDelta: {
+    color: "#7effa0",
+    fontWeight: 600,
+    marginLeft: "auto",
+  },
+  slotOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    background: "linear-gradient(transparent, rgba(0,0,0,0.92) 30%)",
+    padding: "24px 16px 16px",
+    zIndex: 8,
+  },
+  slotTitle: {
+    margin: "0 0 10px",
+    fontSize: 13,
+    color: "#ccc",
+    textAlign: "center",
+  },
+  slotList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  slotBtn: {
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: "1px solid rgba(108, 71, 255, 0.4)",
+    background: "rgba(108, 71, 255, 0.25)",
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: 500,
+    cursor: "pointer",
   },
 };

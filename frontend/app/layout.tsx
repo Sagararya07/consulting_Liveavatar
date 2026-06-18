@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { AuthProvider } from "./lib/AuthContext";
 
 export const metadata: Metadata = {
   title: "LiveAvatar Consulting",
@@ -13,7 +14,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, padding: 0 }}>{children}</body>
+      <body style={{ margin: 0, padding: 0 }}>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

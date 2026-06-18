@@ -1,8 +1,9 @@
 import os
 import traceback
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from models.schemas import IngestResponse
+from models.schemas import IngestResponse, SettingsRequest, SettingsResponse
 from services.ingestion_service import ingest_document
+from services.settings_service import get_settings, update_settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -45,3 +46,15 @@ async def upload_document(file: UploadFile = File(...)):
         message=f"'{file.filename}' ingested successfully.",
         chunks_stored=chunks_stored,
     )
+
+@router.get("/settings", response_model=SettingsResponse)
+async def fetch_settings():
+    """Get avatar name, intro, and prompt settings."""
+    return get_settings()
+
+@router.put("/settings", response_model=SettingsResponse)
+async def save_settings(body: SettingsRequest):
+    """Update avatar settings."""
+    # Only update fields that are provided
+    update_data = {k: v for k, v in body.model_dump().items() if v is not None}
+    return update_settings(update_data)
