@@ -17,7 +17,7 @@ _IN_MEMORY_SUMMARIES: dict[str, list[str]] = {}
 def fetch_past_summaries(
     user_id: str,
     exclude_conversation_id: Optional[str] = None,
-    limit: int = 2,
+    limit: int = 1,
 ) -> list[str]:
     """Return summaries from prior ended conversations for this user."""
     if not supabase:

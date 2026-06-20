@@ -10,7 +10,7 @@ from supabase import Client, create_client
 # Try to load .env from the project root if running locally
 env_path = Path(__file__).resolve().parent.parent / ".env"
 if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
+    load_dotenv(dotenv_path=env_path, override=True)
 
 def get_env_stripped(key: str, default: Optional[str] = None) -> Optional[str]:
     val = os.getenv(key, default)

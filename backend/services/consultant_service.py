@@ -7,17 +7,19 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from config import anthropic_client, supabase
-from services.calendar_service import get_available_slots
+from services.booking_service import format_confirmation_message, mark_lead_booked, save_booking
+from services.calendar_service import Slot, book_slot, get_available_slots
 from services.conversation_service import get_conversation_messages, save_message
 from services.conversation_state_service import get_or_create_state, record_turn
 from services.embedding_service import embed_text
 from services.intent_router import route_intent
 from services.knowledge_store import search_chunks
 from services.lead_scoring_service import apply_score, compute_score_delta, resolve_status
-from services.lead_service import get_or_create_lead, update_lead
+from services.lead_service import get_or_create_lead, get_lead_by_conversation, update_lead
 from services.persona_service import build_system_prompt
 from services.stage_machine_service import missing_qualify_fields, resolve_stage
 from services.structured_memory_service import build_structured_memory_block
@@ -27,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 TOP_K = 5
 MODEL = "claude-haiku-4-5-20251001"
+
+# In-memory cache of pending slots per conversation so the LLM can reference them
+# for oral booking. Keyed by conversation_id.
+_PENDING_SLOTS: dict[str, list[dict]] = {}
 
 
 @dataclass
@@ -40,7 +46,7 @@ class ConsultantTurnResult:
     ui_action: Optional[dict] = field(default=None)
 
 
-async def _retrieve_context(query: str) -> str:
+async def _retrieve_context(query: str, *, user: dict | None = None) -> str:
     try:
         query_embedding = await embed_text(query)
     except Exception as e:
@@ -64,7 +70,14 @@ async def _retrieve_context(query: str) -> str:
                 ]
                 chunks = [row["content"] for row in valid_rows]
             if not chunks:
-                chunks = search_chunks(query_embedding, TOP_K)
+                company_id = None
+                try:
+                    email = (user or {}).get("email")
+                    if email and email.lower().endswith("@cypherswift.com"):
+                        company_id = "cypherswift"
+                except Exception:
+                    company_id = None
+                chunks = search_chunks(query_embedding, TOP_K, company_id=company_id)
         except Exception as e:
             logger.warning(f"Supabase search failed: {e}")
             chunks = search_chunks(query_embedding, TOP_K)
@@ -110,17 +123,24 @@ async def _build_ui_action(
     intent: str,
     ui_action_hint: Optional[dict],
     timezone_str: str,
+    conversation_id: str = "",
 ) -> Optional[dict]:
     if intent != "book_meeting":
         return ui_action_hint
 
     tz = resolve_timezone(timezone_str)
     slots = await get_available_slots(tz)
+    slot_dicts = [s.to_dict(tz) for s in slots]
+
+    # Cache the slots so the LLM can reference them for oral booking on next turn
+    if conversation_id:
+        _PENDING_SLOTS[conversation_id] = slot_dicts
+
     return {
         "type": "show_slots",
         "timezone": tz,
         "message": "Pick a time that works for you",
-        "slots": [s.to_dict(tz) for s in slots],
+        "slots": slot_dicts,
     }
 
 
@@ -178,6 +198,19 @@ async def process_turn(
         fallback = "I apologize, but my AI service is not configured. Please contact the administrator."
         return _finalize(conversation_id, start_time, ConsultantTurnResult(answer=fallback), lead)
 
+    # Build pending-slots context for the LLM so it can match oral slot picks
+    pending_slots_context = ""
+    pending = _PENDING_SLOTS.get(conversation_id, [])
+    if pending:
+        slot_lines = []
+        for idx, s in enumerate(pending):
+            slot_lines.append(f"  Slot {idx}: {s['label']} ({s['start']} to {s['end']})")
+        pending_slots_context = (
+            "\n\nAvailable meeting slots currently shown to the user:\n"
+            + "\n".join(slot_lines)
+            + "\nIf the user picks one of these, set selected_slot_index to its index."
+        )
+
     try:
         response = await anthropic_client.messages.create(
             model=MODEL,
@@ -189,6 +222,7 @@ async def process_turn(
                     "content": (
                         f"Knowledge base context:\n{context}\n\n"
                         f"User message: {query}"
+                        f"{pending_slots_context}"
                     ),
                 }
             ],
@@ -233,7 +267,25 @@ async def process_turn(
         meeting_booked=meeting_booked,
     )
     new_status = resolve_status(new_score, intent, current_status)
-    ui_action = await _build_ui_action(intent, ui_action_hint, timezone_str)
+
+    # ── Oral slot booking: if the LLM selected a slot index, propose it to the frontend ──
+    selected_slot_index = parsed.get("selected_slot_index")
+    pending = _PENDING_SLOTS.get(conversation_id, [])
+    if (
+        selected_slot_index is not None
+        and isinstance(selected_slot_index, int)
+        and 0 <= selected_slot_index < len(pending)
+        and intent == "book_meeting"
+    ):
+        chosen = pending[selected_slot_index]
+        ui_action_hint = {
+            "type": "propose_oral_booking",
+            "slot": chosen,
+            "message": f"Please confirm your booking details for {chosen['label']}.",
+        }
+        answer = f"I've selected the {chosen['label']} slot for you. Please verify and confirm your details on the screen to finalize your booking."
+
+    ui_action = await _build_ui_action(intent, ui_action_hint, timezone_str, conversation_id)
 
     merged_objections = list(objections)
     for obj in new_objections:

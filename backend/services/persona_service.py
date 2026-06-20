@@ -8,27 +8,36 @@ from services.settings_service import get_settings
 
 STAGE_GUIDANCE = {
     "discover": (
-        "Stage: DISCOVER — Understand the visitor's situation and goals. "
-        "Answer their question using the knowledge base, then ask one open-ended "
-        "follow-up to learn about their business or challenge."
+        "Stage: DISCOVER (Intro & Requirement Confirmation) — Understand the visitor's situation. "
+        "In your VERY FIRST turn, warmly greet them by name, reference their company, industry, and service requirement "
+        "from the 'Qualified fields' (form data), and confirm if that is what they want to discuss today."
     ),
     "qualify": (
-        "Stage: QUALIFY — Gather BANT signals: Budget, Authority, Need, Timeline. "
-        "Ask one targeted qualifying question per turn. Do not pitch yet."
+        "Stage: QUALIFY (Service Explanation & Q&A) — Explain the procedures of our service using the knowledge base. "
+        "Answer their questions clearly and concisely to build trust."
     ),
     "anchor": (
-        "Stage: ANCHOR — Connect their pain points to solutions from the knowledge base. "
-        "Demonstrate value and build urgency. Mention relevant outcomes or case patterns."
+        "Stage: ANCHOR (Service Explanation & Q&A) — Connect their pain points to solutions from the knowledge base. "
+        "Demonstrate value and build urgency before moving to scheduling."
     ),
     "book": (
-        "Stage: BOOK — The lead is warm enough. Naturally offer to schedule a call "
-        "with a human expert. Ask if they'd like to see available times."
+        "Stage: BOOK (Meeting Scheduling) — The lead is ready. Propose scheduling a call with our expert team. "
+        "Ask if they'd like to see available times. If they verbally pick a time, book it."
     ),
     "closed": (
-        "Stage: CLOSED — Meeting booked or conversation concluded. "
-        "Confirm next steps and thank them warmly."
+        "Stage: CLOSED (Conclusion) — Meeting booked. Conclude by saying thank you and that our team will reach out to them shortly."
     ),
 }
+
+FRAMEWORK_INSTRUCTION = """
+STRICT CONVERSATION FLOW (5-Minute Limit):
+You must guide the user through this exact flow. The session has a strict 5-minute timer visible to the user on their screen. Keep your responses brief and keep the conversation moving forward.
+1. Form Data Extraction: (Done automatically before chat).
+2. Intro & Requirement Confirmation: Greet them and confirm their requested service based on the form data.
+3. Service Q&A: Explain service procedures using the knowledge base.
+4. Meeting Scheduling: Offer available times and verbally or manually book a meeting.
+5. Conclusion: Say thank you and that the team will reach out.
+"""
 
 JSON_OUTPUT_INSTRUCTION = """
 You MUST respond with valid JSON only — no markdown, no preamble. Use this exact schema:
@@ -50,8 +59,18 @@ You MUST respond with valid JSON only — no markdown, no preamble. Use this exa
   },
   "objections": ["<any new objection heard this turn>"],
   "score_delta": <integer 0-25>,
-  "next_stage": "discover" | "qualify" | "anchor" | "book" | "closed"
+  "next_stage": "discover" | "qualify" | "anchor" | "book" | "closed",
+  "selected_slot_index": null
 }
+
+IMPORTANT — Oral slot booking:
+When the user has been shown available meeting slots and then verbally picks one
+(e.g. "book the 2 PM one", "I'll take the first slot", "the second time works",
+"book Monday 10 AM", "yes, that one"), set:
+  - "intent": "book_meeting"
+  - "selected_slot_index": <0-based integer index of the chosen slot from the
+    list in the context>
+If the user has NOT picked a specific slot, keep "selected_slot_index": null.
 """
 
 
@@ -96,9 +115,10 @@ def build_system_prompt(
         memory_block = f"\n\nStructured memory:\n{structured_memory}"
 
     language_instruction = (
-        "Respond in the same language the user used."
-        if language != "en"
-        else "Respond in English unless the user writes in another language."
+        "LANGUAGE RULE: You MUST detect what language the user is speaking and "
+        "reply in that SAME language. If the user switches language mid-conversation, "
+        "immediately follow them. If the user speaks Hindi, reply in Hindi. "
+        "If English, reply in English. Never force a language — always mirror the user."
     )
 
     routing_rules = """
@@ -106,10 +126,12 @@ Intent routing rules:
 - rag_answer: Answer from knowledge base; default for informational questions.
 - qualify: Ask a qualifying question when you need more BANT info.
 - book_meeting: Offer scheduling when score is high and they show buying intent.
+  If the user verbally selects a specific slot from the available slots, also set
+  selected_slot_index to the 0-based index of that slot.
 - escalate: Route to human when they explicitly ask, or pain is urgent and score >= threshold.
 Keep answers concise — they will be spoken aloud by an avatar."""
 
     return (
-        f"{base_prompt}\n\n{stage_block}{qual_block}{lead_context}"
+        f"{base_prompt}\n\n{FRAMEWORK_INSTRUCTION}\n\n{stage_block}{qual_block}{lead_context}"
         f"{memory_block}\n\n{routing_rules}\n\n{language_instruction}\n\n{JSON_OUTPUT_INSTRUCTION}"
     )

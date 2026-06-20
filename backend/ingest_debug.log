@@ -11,3 +11,15 @@ Supabase batch 2: inserted 20/20 rows
 Supabase batch 3: inserted 12/12 rows
 Supabase insert SUCCESS: 52 total rows inserted
 ingest_document returned: 52
+--- /admin/upload endpoint hit, filename=AiAutomationWebsiteSerivcePageContent.docx ---
+Read 21111 bytes from uploaded file
+=== ingest_document called for 'AiAutomationWebsiteSerivcePageContent.docx' (21111 bytes) ===
+Extracted text length: 10096
+Split into 25 chunks
+Generated 25 embeddings, dim=1536
+Prepared 25 rows for insert
+Deleted old chunks for source_file='AiAutomationWebsiteSerivcePageContent.docx'
+Supabase batch 1: inserted 20/20 rows
+Supabase batch 2: inserted 5/5 rows
+Supabase insert SUCCESS: 25 total rows inserted
+ingest_document returned: 25

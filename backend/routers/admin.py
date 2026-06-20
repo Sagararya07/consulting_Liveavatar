@@ -1,11 +1,14 @@
 import os
 import traceback
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+
 from models.schemas import IngestResponse, SettingsRequest, SettingsResponse
 from services.ingestion_service import ingest_document
 from services.settings_service import get_settings, update_settings
+from middleware.admin_middleware import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
 
 LOG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEBUG_LOG = os.path.join(LOG_DIR, "ingest_debug.log")
@@ -19,8 +22,9 @@ def _write_log(msg: str):
         pass
 
 
-@router.post("/upload", response_model=IngestResponse)
+@router.post("/upload", response_model=IngestResponse, dependencies=[Depends(require_admin)])
 async def upload_document(file: UploadFile = File(...)):
+
     _write_log(f"--- /admin/upload endpoint hit, filename={file.filename} ---")
 
     if not file.filename:
@@ -47,14 +51,15 @@ async def upload_document(file: UploadFile = File(...)):
         chunks_stored=chunks_stored,
     )
 
-@router.get("/settings", response_model=SettingsResponse)
+@router.get("/settings", response_model=SettingsResponse, dependencies=[Depends(require_admin)])
 async def fetch_settings():
+
     """Get avatar name, intro, and prompt settings."""
     return get_settings()
 
 @router.put("/settings", response_model=SettingsResponse)
-async def save_settings(body: SettingsRequest):
-    """Update avatar settings."""
-    # Only update fields that are provided
+async def save_settings(body: SettingsRequest, admin_user: str = Depends(require_admin)):
+
+    """Update avatar settings (permanent & global)."""
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
-    return update_settings(update_data)
+    return update_settings(update_data, updated_by=admin_user)

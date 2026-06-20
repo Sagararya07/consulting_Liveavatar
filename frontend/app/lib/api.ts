@@ -66,6 +66,7 @@ export type UiAction = {
   message?: string;
   timezone?: string;
   slots?: MeetingSlot[];
+  slot?: MeetingSlot;
 };
 
 export type QueryResult = {
@@ -123,6 +124,47 @@ export async function askQuery(
     score_delta: data.score_delta ?? 0,
     ui_action: data.ui_action ?? null,
   };
+}
+
+export async function initSession(
+  language: string,
+  preChatData: Record<string, string>,
+  token?: string
+): Promise<{ conversation_id: string }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}/query/init`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      language,
+      pre_chat_data: preChatData,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Error initializing session");
+  }
+  return res.json();
+}
+
+export async function translateIntro(text: string, targetLanguage: string): Promise<string> {
+  if (!targetLanguage || targetLanguage === "en" || targetLanguage === "multi") {
+    return text;
+  }
+  try {
+    const res = await fetch(`${API_URL}/query/translate-intro`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, target_language: targetLanguage }),
+    });
+    if (!res.ok) return text;
+    const data = await res.json();
+    return data.translated || text;
+  } catch {
+    return text;
+  }
 }
 
 export async function endSession(conversationId: string, token?: string): Promise<void> {
@@ -221,6 +263,7 @@ export async function bookMeeting(
     timezone?: string;
     attendee_name?: string;
     attendee_email?: string;
+    company_name?: string;
   }
 ) {
   const res = await fetch(`${API_URL}/scheduling/book`, {
@@ -244,21 +287,86 @@ export async function bookMeeting(
   };
 }
 
+// ── ADMIN AUTH ─────────────────────────────────────────────
+export async function adminLogin(username: string, password: string): Promise<string> {
+  const res = await fetch(`${API_URL}/admin-auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Admin login failed");
+  return data.token as string;
+}
+
 // ── SETTINGS ────────────────────────────────────────────────
-export async function getSettings() {
-  const res = await fetch(`${API_URL}/admin/settings`);
+export async function getSettings(adminToken?: string) {
+  const res = await fetch(`${API_URL}/admin/settings`, {
+    headers: adminToken ? { Authorization: `Bearer ${adminToken}` } : {},
+  });
   if (!res.ok) throw new Error("Failed to get settings");
   return res.json();
 }
 
-export async function updateSettings(data: any) {
+export async function updateSettings(data: any, adminToken?: string) {
   const res = await fetch(`${API_URL}/admin/settings`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+    },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update settings");
   return res.json();
 }
+
+// ── ADMIN: DATABASE VIEWER ─────────────────────────────────
+
+export type AdminTableInfo = {
+  name: string;
+  row_count: number | null;
+  available: boolean;
+};
+
+export type AdminTablePage = {
+  name: string;
+  rows: Record<string, unknown>[];
+  total: number;
+  columns: string[];
+  available: boolean;
+  error?: string;
+};
+
+export async function listTables(adminToken: string): Promise<AdminTableInfo[]> {
+  const res = await fetch(`${API_URL}/admin/db/tables`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (!res.ok) throw new Error("Failed to list tables");
+  const data = await res.json();
+  return (data.tables || []) as AdminTableInfo[];
+}
+
+export async function getTableRows(
+  name: string,
+  adminToken: string,
+  opts: { limit?: number; offset?: number; q?: string } = {}
+): Promise<AdminTablePage> {
+  const params = new URLSearchParams();
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  if (opts.offset != null) params.set("offset", String(opts.offset));
+  if (opts.q) params.set("q", opts.q);
+  const qs = params.toString();
+  const url = `${API_URL}/admin/db/table/${encodeURIComponent(name)}${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(detail.detail || "Failed to fetch table");
+  }
+  return res.json() as Promise<AdminTablePage>;
+}
+
 
 

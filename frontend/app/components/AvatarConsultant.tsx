@@ -16,6 +16,8 @@ import {
   getLanguages,
   getSettings,
   getUserTimezone,
+  translateIntro,
+  initSession,
   type LiveAvatarLanguage,
   type MeetingSlot,
   type QueryResult,
@@ -48,6 +50,44 @@ export default function AvatarConsultant() {
   const [slotTimezone, setSlotTimezone] = useState("");
   const [bookingSlotId, setBookingSlotId] = useState<string | null>(null);
 
+  // Prefetch token and session timer states
+  const [heygenTokenState, setHeygenTokenState] = useState<string | null>(null);
+  const [timeLeft, setTimeLeft] = useState(300);
+
+  // Booking verification modal state
+  const [confirmSlot, setConfirmSlot] = useState<MeetingSlot | null>(null);
+  const [confirmName, setConfirmName] = useState("");
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [confirmCompany, setConfirmCompany] = useState("");
+  const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
+
+  // Pre-Chat form state
+  const [showPreChatForm, setShowPreChatForm] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    company_name: "",
+    role: "",
+    industry_type: "",
+    company_website: "",
+    location: "",
+    num_employees: "",
+    service_requirement: "",
+    budget_range: "",
+    expected_timeline: ""
+  });
+
+  useEffect(() => {
+    if (user) {
+      setFormData(prev => ({
+        ...prev,
+        name: prev.name || user.name || "",
+        email: prev.email || user.email || ""
+      }));
+    }
+  }, [user]);
+
   const userTimezone = useRef(getUserTimezone());
 
   // Keep track of conversation ID returned from the backend
@@ -66,6 +106,18 @@ export default function AvatarConsultant() {
       .catch(console.error);
   }, []);
 
+  // Prefetch HeyGen token on mount or language switch to minimize connection delay
+  useEffect(() => {
+    if (!token) return;
+    getHeygenToken(token, AVATAR_ID, VOICE_ID, selectedLanguage)
+      .then((t) => {
+        setHeygenTokenState(t);
+      })
+      .catch((err) => {
+        console.error("Token prefetch failed:", err);
+      });
+  }, [token, selectedLanguage]);
+
   // ── Apply consultant turn result to UI state ────────
   const applyQueryResult = useCallback((result: QueryResult) => {
     if (result.conversation_id) conversationId.current = result.conversation_id;
@@ -76,61 +128,97 @@ export default function AvatarConsultant() {
       status: result.status,
       score_delta: result.score_delta,
     });
-    if (result.ui_action?.type === "show_slots" && result.ui_action.slots?.length) {
+
+    // Handle oral auto-booking: the backend already booked the slot
+    if (result.ui_action?.type === "slot_auto_booked") {
+      setAvailableSlots([]);
+      setStatus("Meeting booked!");
+    } else if (result.ui_action?.type === "propose_oral_booking" && result.ui_action.slot) {
+      // Propose oral booking: open confirmation modal
+      setConfirmSlot(result.ui_action.slot);
+    } else if (result.ui_action?.type === "show_slots" && result.ui_action.slots?.length) {
       setAvailableSlots(result.ui_action.slots);
       setSlotTimezone(result.ui_action.timezone || userTimezone.current);
     } else if (result.intent !== "book_meeting") {
       setAvailableSlots([]);
     }
     return result.answer;
+  }, [user]);
+
+  const handleBookSlotClick = useCallback((slot: MeetingSlot) => {
+    setConfirmSlot(slot);
   }, []);
 
-  const handleBookSlot = useCallback(async (slot: MeetingSlot) => {
-    if (!token || !conversationId.current || bookingSlotId) return;
-    setBookingSlotId(slot.id);
+  const handleBookSlotConfirm = useCallback(async () => {
+    if (!token || !conversationId.current || !confirmSlot || isSubmittingBooking) return;
+    setIsSubmittingBooking(true);
     setStatus("Booking your meeting…");
 
     try {
       const result = await bookMeeting(token, {
         conversation_id: conversationId.current,
-        slot_id: slot.id,
-        slot_start: slot.start,
-        slot_end: slot.end,
-        timezone: slot.timezone || slotTimezone || userTimezone.current,
-        attendee_name: user?.name,
-        attendee_email: user?.email,
+        slot_id: confirmSlot.id,
+        slot_start: confirmSlot.start,
+        slot_end: confirmSlot.end,
+        timezone: confirmSlot.timezone || slotTimezone || userTimezone.current,
+        attendee_name: formData.name,
+        attendee_email: formData.email,
+        company_name: formData.company_name,
       });
 
       setAvailableSlots([]);
+      setConfirmSlot(null);
       setLeadState((prev) => prev ? { ...prev, stage: result.stage, status: result.status, intent: "rag_answer" } : prev);
       avatarRef.current?.repeat(result.message);
       setStatus("Meeting booked!");
     } catch (err) {
       console.error(err);
-      setStatus("Could not book that slot. Please try another.");
+      setStatus("Could not book that slot. Please try again.");
     } finally {
-      setBookingSlotId(null);
+      setIsSubmittingBooking(false);
     }
-  }, [token, user, slotTimezone, bookingSlotId]);
+  }, [token, confirmSlot, slotTimezone, confirmName, confirmEmail, confirmCompany, isSubmittingBooking]);
+
+  const handlePreChatSubmit = async () => {
+    if (!token) return;
+    setLoading(true);
+    setStatus("Initializing session...");
+    try {
+      const res = await initSession(selectedLanguage, formData as Record<string, string>, token);
+      setShowPreChatForm(false);
+      await startSession(res.conversation_id);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || "Failed to initialize session");
+      setLoading(false);
+      setStatus("");
+    }
+  };
 
   // ── Start avatar session ────────────────────────────
-  const startSession = useCallback(async () => {
+  const startSession = useCallback(async (existingConvId?: string) => {
     if (!user || !token) return;
     setLoading(true);
     setErrorMsg("");
     setStatus("Requesting session token…");
-    conversationId.current = ""; // reset for new session
+    if (existingConvId && typeof existingConvId === "string") {
+      conversationId.current = existingConvId;
+    } else {
+      conversationId.current = ""; // reset for new session
+    }
     setLeadState(null);
     setAvailableSlots([]);
 
-    let heygenToken: string;
-    try {
-      heygenToken = await getHeygenToken(token, AVATAR_ID, VOICE_ID, selectedLanguage);
-    } catch (err: any) {
-      setLoading(false);
-      setErrorMsg(err.message || "Failed to get session token");
-      setStatus("");
-      return;
+    let heygenToken = heygenTokenState;
+    if (!heygenToken) {
+      try {
+        heygenToken = await getHeygenToken(token, AVATAR_ID, VOICE_ID, selectedLanguage);
+      } catch (err: any) {
+        setLoading(false);
+        setErrorMsg(err.message || "Failed to get session token");
+        setStatus("");
+        return;
+      }
     }
 
     setStatus("Starting avatar session…");
@@ -185,18 +273,47 @@ export default function AvatarConsultant() {
       setIsListening(true);
 
       // Speak welcome dialogue once fully connected
-      try {
-        const settings = await getSettings();
-        let intro = settings.avatar_intro || "Hello, I am ready to assist you.";
-        // Replace variables
-        intro = intro.replace("{user_name}", user.name || "friend");
-        intro = intro.replace("{avatar_name}", settings.avatar_name || "Annie");
-        session.repeat(intro);
-      } catch (e) {
-        // Fallback if settings fail
-        session.repeat(`Hello ${user.name}, how may I assist you today?`);
+      if (conversationId.current) {
+        try {
+          setStatus("Generating personalized intro...");
+          const result = await askQuery(
+            user.id,
+            "Hello, I just submitted the form. Please greet me and confirm my requirements.",
+            selectedLanguage,
+            conversationId.current,
+            token,
+            userTimezone.current
+          );
+          const answer = applyQueryResult(result);
+          session.repeat(answer);
+          setStatus("Avatar ready. Ask your question.");
+        } catch(err) {
+          console.error(err);
+          session.repeat(`Hello ${user.name}, how may I assist you today?`);
+        }
+      } else {
+        try {
+          const settings = await getSettings();
+          let intro = settings.avatar_intro || "Hello, I am ready to assist you.";
+          // Replace variables (global admin-driven identity)
+          const avatarName = settings.avatar_name || "";
+          intro = intro.replace("{user_name}", user.name || "friend");
+          // If template doesn't include {avatar_name}, this is a no-op
+          intro = intro.replace("{avatar_name}", avatarName);
+
+          // Translate the intro if the user selected a non-English language
+          if (selectedLanguage && selectedLanguage !== "en" && selectedLanguage !== "multi") {
+            intro = await translateIntro(intro, selectedLanguage);
+          }
+
+          session.repeat(intro);
+        } catch (e) {
+          // Fallback if settings fail (no hardcoded avatar name)
+          session.repeat(`Hello ${user.name}, how may I assist you today?`);
+        }
       }
     } catch (err: any) {
+
       setLoading(false);
       setErrorMsg(err.message || "Failed to start avatar session");
       setStatus("");
@@ -247,6 +364,31 @@ export default function AvatarConsultant() {
     setStatus("Session ended. Your conversation has been saved.");
   }, [token]);
 
+  // Countdown Timer Effect: 5 minutes session limit
+  useEffect(() => {
+    if (!started) return;
+    setTimeLeft(300); // Reset to 300 seconds (5 minutes)
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          stopSession();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [started, stopSession]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
   // ── Keyboard submit ──────────────────────────────────
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -263,7 +405,21 @@ export default function AvatarConsultant() {
           <div style={styles.avatarCircle}>{user?.name?.[0]?.toUpperCase()}</div>
           <span style={styles.userName}>{user?.name}</span>
         </div>
+        {started && (
+          <div style={styles.timerBadge}>
+            ⏱️ {formatTime(timeLeft)}
+          </div>
+        )}
         <button onClick={logout} style={styles.logoutBtn}>Logout</button>
+      </div>
+
+      {/* Company Logo representing Cypher Swift */}
+      <div style={styles.logoContainer}>
+        <img 
+          src="/cypher_swift_logo.png" 
+          alt="Cypher Swift Logo" 
+          style={styles.logoImage} 
+        />
       </div>
 
       <div style={styles.videoBox}>
@@ -298,7 +454,7 @@ export default function AvatarConsultant() {
                 </select>
                 <span style={styles.chevron}>▼</span>
               </div>
-              <button onClick={startSession} style={styles.chatNowBtn}>
+              <button onClick={() => setShowPreChatForm(true)} style={styles.chatNowBtn}>
                 Chat now
               </button>
             </div>
@@ -327,10 +483,9 @@ export default function AvatarConsultant() {
                 <button
                   key={slot.id}
                   style={styles.slotBtn}
-                  disabled={bookingSlotId === slot.id}
-                  onClick={() => handleBookSlot(slot)}
+                  onClick={() => handleBookSlotClick(slot)}
                 >
-                  {bookingSlotId === slot.id ? "Booking…" : slot.label}
+                  {slot.label}
                 </button>
               ))}
             </div>
@@ -338,22 +493,7 @@ export default function AvatarConsultant() {
         )}
       </div>
 
-      {started && leadState && (
-        <div style={styles.leadPanel}>
-          <span style={styles.leadLabel}>Consultant</span>
-          <span style={styles.leadChip}>{leadState.stage}</span>
-          <span style={{
-            ...styles.leadChip,
-            color: leadState.status === "hot" ? "#ff9f43" : leadState.status === "warm" ? "#ffd166" : "#aaa",
-          }}>
-            {leadState.status} · {leadState.lead_score}
-          </span>
-          <span style={styles.leadChip}>{leadState.intent.replace("_", " ")}</span>
-          {leadState.score_delta > 0 && (
-            <span style={styles.leadDelta}>+{leadState.score_delta}</span>
-          )}
-        </div>
-      )}
+
 
       {started && (
         <div style={styles.controls}>
@@ -378,6 +518,210 @@ export default function AvatarConsultant() {
           </button>
         </div>
       )}
+
+      {confirmSlot && (
+        <div style={styles.modalOverlay}>
+          <div style={{...styles.modalContent, maxHeight: '90vh', overflowY: 'auto', width: '90%', maxWidth: '600px'}}>
+            <h3 style={styles.modalTitle}>Confirm Booking Details</h3>
+            <p style={styles.modalSubtitle}>
+              You are booking a meeting for:
+              <br />
+              <strong>{confirmSlot.label} ({slotTimezone || userTimezone.current})</strong>
+            </p>
+            
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px'}}>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Name</label>
+                <input type="text" style={styles.formInput} value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Business Mail</label>
+                <input type="email" style={styles.formInput} value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Calling/WhatsApp Number</label>
+                <input type="text" style={styles.formInput} value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Company Name</label>
+                <input type="text" style={styles.formInput} value={formData.company_name} onChange={(e) => setFormData({...formData, company_name: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Role/Designation</label>
+                <input type="text" style={styles.formInput} value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Company Website</label>
+                <input type="text" style={styles.formInput} value={formData.company_website} onChange={(e) => setFormData({...formData, company_website: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Location</label>
+                <input type="text" style={styles.formInput} value={formData.location} onChange={(e) => setFormData({...formData, location: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Number of Employees</label>
+                <input type="text" style={styles.formInput} value={formData.num_employees} onChange={(e) => setFormData({...formData, num_employees: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Budget Range</label>
+                <input type="text" style={styles.formInput} value={formData.budget_range} onChange={(e) => setFormData({...formData, budget_range: e.target.value})} />
+              </div>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Industry Type</label>
+              <select style={styles.formInput} value={formData.industry_type} onChange={(e) => setFormData({...formData, industry_type: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="AI Agent Development">AI Agent Development</option>
+                <option value="AI Automation for Marketing and Sales">AI Automation for Marketing and Sales</option>
+                <option value="SaaS Product Development">SaaS Product Development</option>
+                <option value="Website / Application Development">Website / Application Development</option>
+                <option value="CRM / ERP / LMS Development">CRM / ERP / LMS Development</option>
+                <option value="Digital Optimization & Branding">Digital Optimization & Branding</option>
+                <option value="Cloud Infrastructure & Maintenance">Cloud Infrastructure & Maintenance</option>
+              </select>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Service Requirement</label>
+              <select style={styles.formInput} value={formData.service_requirement} onChange={(e) => setFormData({...formData, service_requirement: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="AI Agent Development">AI Agent Development</option>
+                <option value="AI Automation for Marketing and Sales">AI Automation for Marketing and Sales</option>
+                <option value="SaaS Product Development">SaaS Product Development</option>
+                <option value="Website / Application Development">Website / Application Development</option>
+                <option value="CRM / ERP / LMS Development">CRM / ERP / LMS Development</option>
+                <option value="Digital Optimization & Branding">Digital Optimization & Branding</option>
+                <option value="Cloud Infrastructure & Maintenance">Cloud Infrastructure & Maintenance</option>
+              </select>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Expected Timeline</label>
+              <select style={styles.formInput} value={formData.expected_timeline} onChange={(e) => setFormData({...formData, expected_timeline: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="Immediately">Immediately</option>
+                <option value="Within 1 Month">Within 1 Month</option>
+                <option value="Within 3 Months">Within 3 Months</option>
+                <option value="Planning Stage">Planning Stage</option>
+              </select>
+            </div>
+            
+            <div style={styles.modalActions}>
+              <button
+                onClick={() => setConfirmSlot(null)}
+                style={styles.modalCancelBtn}
+                disabled={isSubmittingBooking}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBookSlotConfirm}
+                style={styles.modalConfirmBtn}
+                disabled={isSubmittingBooking || !formData.name || !formData.email}
+              >
+                {isSubmittingBooking ? "Booking..." : "Confirm & Book"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPreChatForm && (
+        <div style={styles.modalOverlay}>
+          <div style={{...styles.modalContent, maxHeight: '90vh', overflowY: 'auto', width: '90%', maxWidth: '600px'}}>
+            <h3 style={styles.modalTitle}>Before we begin...</h3>
+            <p style={styles.modalSubtitle}>Please tell us a bit about yourself.</p>
+            
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px'}}>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Name</label>
+                <input type="text" style={styles.formInput} value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Business Mail</label>
+                <input type="email" style={styles.formInput} value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Calling/WhatsApp Number</label>
+                <input type="text" style={styles.formInput} value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Company Name</label>
+                <input type="text" style={styles.formInput} value={formData.company_name} onChange={(e) => setFormData({...formData, company_name: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Role/Designation</label>
+                <input type="text" style={styles.formInput} value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Company Website</label>
+                <input type="text" style={styles.formInput} value={formData.company_website} onChange={(e) => setFormData({...formData, company_website: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Location</label>
+                <input type="text" style={styles.formInput} value={formData.location} onChange={(e) => setFormData({...formData, location: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Number of Employees</label>
+                <input type="text" style={styles.formInput} value={formData.num_employees} onChange={(e) => setFormData({...formData, num_employees: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.formLabel}>Budget Range</label>
+                <input type="text" style={styles.formInput} value={formData.budget_range} onChange={(e) => setFormData({...formData, budget_range: e.target.value})} />
+              </div>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Industry Type</label>
+              <select style={styles.formInput} value={formData.industry_type} onChange={(e) => setFormData({...formData, industry_type: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="AI Agent Development">AI Agent Development</option>
+                <option value="AI Automation for Marketing and Sales">AI Automation for Marketing and Sales</option>
+                <option value="SaaS Product Development">SaaS Product Development</option>
+                <option value="Website / Application Development">Website / Application Development</option>
+                <option value="CRM / ERP / LMS Development">CRM / ERP / LMS Development</option>
+                <option value="Digital Optimization & Branding">Digital Optimization & Branding</option>
+                <option value="Cloud Infrastructure & Maintenance">Cloud Infrastructure & Maintenance</option>
+              </select>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Service Requirement</label>
+              <select style={styles.formInput} value={formData.service_requirement} onChange={(e) => setFormData({...formData, service_requirement: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="AI Agent Development">AI Agent Development</option>
+                <option value="AI Automation for Marketing and Sales">AI Automation for Marketing and Sales</option>
+                <option value="SaaS Product Development">SaaS Product Development</option>
+                <option value="Website / Application Development">Website / Application Development</option>
+                <option value="CRM / ERP / LMS Development">CRM / ERP / LMS Development</option>
+                <option value="Digital Optimization & Branding">Digital Optimization & Branding</option>
+                <option value="Cloud Infrastructure & Maintenance">Cloud Infrastructure & Maintenance</option>
+              </select>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.formLabel}>Expected Timeline</label>
+              <select style={styles.formInput} value={formData.expected_timeline} onChange={(e) => setFormData({...formData, expected_timeline: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="Immediately">Immediately</option>
+                <option value="Within 1 Month">Within 1 Month</option>
+                <option value="Within 3 Months">Within 3 Months</option>
+                <option value="Planning Stage">Planning Stage</option>
+              </select>
+            </div>
+            
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowPreChatForm(false)} style={styles.modalCancelBtn} disabled={loading}>
+                Cancel
+              </button>
+              <button onClick={handlePreChatSubmit} style={styles.modalConfirmBtn} disabled={loading}>
+                {loading ? "Starting..." : "Start Chat"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -400,6 +744,24 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  logoContainer: {
+    width: "100%",
+    maxWidth: 720,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "#ffffff",
+    padding: "10px",
+    borderRadius: "12px",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    boxShadow: "0 4px 15px rgba(0, 0, 0, 0.5)",
+    marginBottom: "0.25rem",
+  },
+  logoImage: {
+    height: "55px",
+    width: "auto",
+    objectFit: "contain",
   },
   userInfo: {
     display: "flex",
@@ -642,6 +1004,104 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     fontSize: 14,
     fontWeight: 500,
+    cursor: "pointer",
+  },
+  timerBadge: {
+    background: "rgba(239, 68, 68, 0.2)",
+    border: "1px solid rgba(239, 68, 68, 0.4)",
+    color: "#fca5a5",
+    padding: "4px 10px",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontWeight: "bold",
+    fontFamily: "monospace",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  modalOverlay: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    backdropFilter: "blur(8px)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: "#18181b",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "16px",
+    padding: "24px",
+    width: "90%",
+    maxWidth: "400px",
+    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)",
+  },
+  modalTitle: {
+    fontSize: "18px",
+    fontWeight: "bold",
+    color: "#ffffff",
+    marginBottom: "8px",
+    textAlign: "center",
+  },
+  modalSubtitle: {
+    fontSize: "14px",
+    color: "#a1a1aa",
+    marginBottom: "20px",
+    textAlign: "center",
+    lineHeight: "1.5",
+  },
+  formGroup: {
+    marginBottom: "16px",
+  },
+  formLabel: {
+    display: "block",
+    fontSize: "12px",
+    fontWeight: "bold",
+    color: "#a1a1aa",
+    marginBottom: "6px",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  },
+  formInput: {
+    width: "100%",
+    backgroundColor: "#09090b",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "8px",
+    padding: "10px 12px",
+    color: "#ffffff",
+    fontSize: "14px",
+    outline: "none",
+  },
+  modalActions: {
+    display: "flex",
+    gap: "12px",
+    marginTop: "24px",
+  },
+  modalCancelBtn: {
+    flex: 1,
+    padding: "10px 16px",
+    backgroundColor: "transparent",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "8px",
+    color: "#e4e4e7",
+    fontSize: "14px",
+    fontWeight: "500",
+    cursor: "pointer",
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    padding: "10px 16px",
+    backgroundColor: "#7c3aed",
+    border: "none",
+    borderRadius: "8px",
+    color: "#ffffff",
+    fontSize: "14px",
+    fontWeight: "500",
     cursor: "pointer",
   },
 };

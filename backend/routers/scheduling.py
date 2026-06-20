@@ -28,6 +28,7 @@ class BookRequest(BaseModel):
     timezone: Optional[str] = "UTC"
     attendee_name: Optional[str] = None
     attendee_email: Optional[EmailStr] = None
+    company_name: Optional[str] = None
 
 
 @router.post("/slots")
@@ -97,6 +98,13 @@ async def create_booking(
         attendee_name=name,
         external_booking_id=cal_result["external_booking_id"],
     )
+
+    if body.company_name:
+        try:
+            from services.lead_service import update_lead
+            update_lead(body.conversation_id, qualified_fields={"company": body.company_name})
+        except Exception as e:
+            logger.warning(f"Failed to update company name on lead: {e}")
 
     mark_lead_booked(body.conversation_id)
 
