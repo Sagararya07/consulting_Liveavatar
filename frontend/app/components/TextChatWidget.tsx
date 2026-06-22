@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../lib/AuthContext";
-import { askQuery, getSettings, bookMeeting, type MeetingSlot } from "../lib/api";
+import { askQuery, getSettings, bookMeeting, initSession, type MeetingSlot } from "../lib/api";
 
 export default function TextChatWidget() {
   const { user, token } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [showPreChatForm, setShowPreChatForm] = useState(false);
   const [messages, setMessages] = useState<{role: "user" | "avatar", text: string}[]>([]);
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,12 +19,36 @@ export default function TextChatWidget() {
   const [formData, setFormData] = useState({
     name: user?.name || "",
     email: user?.email || "",
+    phone: "",
     company_name: "",
+    role: "",
+    company_website: "",
+    location: "",
+    num_employees: "",
+    budget_range: "",
+    industry_type: "",
+    service_requirement: "",
+    expected_timeline: ""
   });
+
+  const handlePreChatSubmit = async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await initSession("multi", formData as Record<string, string>, token);
+      setShowPreChatForm(false);
+      conversationId.current = res.conversation_id;
+      setIsOpen(true);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Initialize intro message
   useEffect(() => {
-    if (isOpen && messages.length === 0) {
+    if (isOpen && messages.length === 0 && conversationId.current) {
        const loadIntro = async () => {
          try {
            const settings = await getSettings();
@@ -128,7 +153,13 @@ export default function TextChatWidget() {
     <>
       {/* Floating Button */}
       <button 
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (!isOpen && !conversationId.current) {
+            setShowPreChatForm(true);
+          } else {
+            setIsOpen(!isOpen);
+          }
+        }}
         style={styles.floatingBtn}
       >
         💬 Test Chat
@@ -187,6 +218,103 @@ export default function TextChatWidget() {
               <button onClick={() => setConfirmSlot(null)} style={{flex: 1, padding: '8px', background: '#444', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer'}}>Cancel</button>
               <button onClick={handleBookSlotConfirm} style={{flex: 1, padding: '8px', background: '#007bff', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer'}} disabled={isSubmittingBooking}>
                 {isSubmittingBooking ? "Booking..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pre-Chat Form Modal */}
+      {showPreChatForm && (
+        <div style={styles.modalOverlay}>
+          <div style={{...styles.modalContent, maxHeight: '90vh', overflowY: 'auto', width: '90%', maxWidth: '600px'}}>
+            <h3 style={{marginTop: 0}}>Before we begin...</h3>
+            <p style={{fontSize: '14px', color: '#ccc', marginBottom: '20px'}}>Please tell us a bit about yourself.</p>
+            
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px'}}>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Name</label>
+                <input type="text" style={styles.modalInput} value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Business Mail</label>
+                <input type="email" style={styles.modalInput} value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Phone</label>
+                <input type="text" style={styles.modalInput} value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Company Name</label>
+                <input type="text" style={styles.modalInput} value={formData.company_name} onChange={(e) => setFormData({...formData, company_name: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Role/Designation</label>
+                <input type="text" style={styles.modalInput} value={formData.role} onChange={(e) => setFormData({...formData, role: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Company Website</label>
+                <input type="text" style={styles.modalInput} value={formData.company_website} onChange={(e) => setFormData({...formData, company_website: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Location</label>
+                <input type="text" style={styles.modalInput} value={formData.location} onChange={(e) => setFormData({...formData, location: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Number of Employees</label>
+                <input type="text" style={styles.modalInput} value={formData.num_employees} onChange={(e) => setFormData({...formData, num_employees: e.target.value})} />
+              </div>
+              <div>
+                <label style={{fontSize: '12px', color: '#aaa'}}>Budget Range</label>
+                <input type="text" style={styles.modalInput} value={formData.budget_range} onChange={(e) => setFormData({...formData, budget_range: e.target.value})} />
+              </div>
+            </div>
+
+            <div style={{marginTop: '10px'}}>
+              <label style={{fontSize: '12px', color: '#aaa'}}>Industry Type</label>
+              <select style={styles.modalInput} value={formData.industry_type} onChange={(e) => setFormData({...formData, industry_type: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="AI Agent Development">AI Agent Development</option>
+                <option value="AI Automation for Marketing and Sales">AI Automation for Marketing and Sales</option>
+                <option value="SaaS Product Development">SaaS Product Development</option>
+                <option value="Website / Application Development">Website / Application Development</option>
+                <option value="CRM / ERP / LMS Development">CRM / ERP / LMS Development</option>
+                <option value="Digital Optimization & Branding">Digital Optimization & Branding</option>
+                <option value="Cloud Infrastructure & Maintenance">Cloud Infrastructure & Maintenance</option>
+              </select>
+            </div>
+
+            <div style={{marginTop: '10px'}}>
+              <label style={{fontSize: '12px', color: '#aaa'}}>Service Requirement</label>
+              <select style={styles.modalInput} value={formData.service_requirement} onChange={(e) => setFormData({...formData, service_requirement: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="AI Agent Development">AI Agent Development</option>
+                <option value="AI Automation for Marketing and Sales">AI Automation for Marketing and Sales</option>
+                <option value="SaaS Product Development">SaaS Product Development</option>
+                <option value="Website / Application Development">Website / Application Development</option>
+                <option value="CRM / ERP / LMS Development">CRM / ERP / LMS Development</option>
+                <option value="Digital Optimization & Branding">Digital Optimization & Branding</option>
+                <option value="Cloud Infrastructure & Maintenance">Cloud Infrastructure & Maintenance</option>
+              </select>
+            </div>
+
+            <div style={{marginTop: '10px'}}>
+              <label style={{fontSize: '12px', color: '#aaa'}}>Expected Timeline</label>
+              <select style={styles.modalInput} value={formData.expected_timeline} onChange={(e) => setFormData({...formData, expected_timeline: e.target.value})}>
+                <option value="">Select...</option>
+                <option value="Immediately">Immediately</option>
+                <option value="Within 1 Month">Within 1 Month</option>
+                <option value="Within 3 Months">Within 3 Months</option>
+                <option value="Planning Stage">Planning Stage</option>
+              </select>
+            </div>
+            
+            <div style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
+              <button onClick={() => setShowPreChatForm(false)} style={{flex: 1, padding: '10px', background: '#444', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer'}} disabled={loading}>
+                Cancel
+              </button>
+              <button onClick={handlePreChatSubmit} style={{flex: 1, padding: '10px', background: '#007bff', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer'}} disabled={loading}>
+                {loading ? "Starting..." : "Start Chat"}
               </button>
             </div>
           </div>

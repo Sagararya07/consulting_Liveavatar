@@ -8,35 +8,42 @@ from services.settings_service import get_settings
 
 STAGE_GUIDANCE = {
     "discover": (
-        "Stage: DISCOVER (Intro & Requirement Confirmation) — Understand the visitor's situation. "
-        "In your VERY FIRST turn, warmly greet them by name, reference their company, industry, and service requirement "
-        "from the 'Qualified fields' (form data), and confirm if that is what they want to discuss today."
+        "Stage: INTRO — Introduce yourself as Avor. "
+        "In your VERY FIRST turn ONLY, warmly greet them by name, state the problem or service they selected on the form, "
+        "and explicitly ask if they are ready to learn more about it. "
+        "CRITICAL: Do NOT repeat the greeting in subsequent turns. WAIT for the user to respond."
     ),
     "qualify": (
-        "Stage: QUALIFY (Service Explanation & Q&A) — Explain the procedures of our service using the knowledge base. "
-        "Answer their questions clearly and concisely to build trust."
+        "Stage: EXPLAIN SERVICE — The user has confirmed they want to learn about the service. "
+        "Explicitly explain the procedure and details about the service using the knowledge base. "
+        "Once explained, immediately transition towards suggesting a meeting."
     ),
     "anchor": (
-        "Stage: ANCHOR (Service Explanation & Q&A) — Connect their pain points to solutions from the knowledge base. "
-        "Demonstrate value and build urgency before moving to scheduling."
+        "Stage: EXPLAIN SERVICE — (Continued) Answer any remaining questions , then transition to booking."
     ),
     "book": (
-        "Stage: BOOK (Meeting Scheduling) — The lead is ready. Propose scheduling a call with our expert team. "
-        "Ask if they'd like to see available times. If they verbally pick a time, book it."
+        "Stage: BOOK (Meeting Scheduling) — Suggest meeting timings ONCE. "
+        "CRITICAL: Do NOT repeat the timings again and again. If the user replies with a timing or agrees to one, "
+        "FIX THAT TIMING and set intent to 'book_meeting' with selected_slot_index. DO NOT repeat the conversation."
     ),
     "closed": (
-        "Stage: CLOSED (Conclusion) — Meeting booked. Conclude by saying thank you and that our team will reach out to them shortly."
+        "Stage: CLOSED (Conclusion) — Meeting is scheduled. "
+        "Say 'Thank you, the meeting is booked.' and end the conversation."
     ),
 }
 
 FRAMEWORK_INSTRUCTION = """
-STRICT CONVERSATION FLOW (5-Minute Limit):
-You must guide the user through this exact flow. The session has a strict 5-minute timer visible to the user on their screen. Keep your responses brief and keep the conversation moving forward.
-1. Form Data Extraction: (Done automatically before chat).
-2. Intro & Requirement Confirmation: Greet them and confirm their requested service based on the form data.
-3. Service Q&A: Explain service procedures using the knowledge base.
-4. Meeting Scheduling: Offer available times and verbally or manually book a meeting.
-5. Conclusion: Say thank you and that the team will reach out.
+STRICT CONVERSATION FLOW:
+1. Introduction: Introduce yourself as Avor and mention the problem/service selected on their form. (DO THIS ONLY ONCE)
+2. Explain Service: Explain the procedure and details about the selected service.
+3. Schedule Meeting: Suggest meeting timings. Say the timings ONCE. If the user picks a timing, book it immediately.
+4. Conclusion: After the meeting is scheduled, say "Thank you" and end the conversation.
+
+CRITICAL RULES TO AVOID LOOPING:
+- NEVER repeat a conversation phase you have already completed.
+- NEVER repeat the meeting timings. Say them once, and if they pick one, fix it and book.
+- NEVER talk to yourself or generate a response for the user.
+- You must ask exactly ONE question at a time and WAIT explicitly for the user to answer before continuing.
 """
 
 JSON_OUTPUT_INSTRUCTION = """
@@ -114,12 +121,18 @@ def build_system_prompt(
     if structured_memory:
         memory_block = f"\n\nStructured memory:\n{structured_memory}"
 
-    language_instruction = (
-        "LANGUAGE RULE: You MUST detect what language the user is speaking and "
-        "reply in that SAME language. If the user switches language mid-conversation, "
-        "immediately follow them. If the user speaks Hindi, reply in Hindi. "
-        "If English, reply in English. Never force a language — always mirror the user."
-    )
+    if language in ("multi", ""):
+        language_instruction = (
+            "LANGUAGE RULE: You MUST detect what language the user is speaking and "
+            "reply in that SAME language. If the user switches language mid-conversation, "
+            "immediately follow them. Never force a language — always mirror the user."
+        )
+    else:
+        language_instruction = (
+            f"LANGUAGE RULE: The user has explicitly selected the language code '{language}'. "
+            f"You MUST generate ALL of your spoken responses strictly in the language corresponding to ISO code '{language}'. "
+            f"Even if the user speaks a different language, your response MUST be in the language for code '{language}'."
+        )
 
     routing_rules = """
 Intent routing rules:

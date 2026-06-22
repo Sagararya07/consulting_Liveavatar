@@ -65,8 +65,5 @@ def mark_lead_booked(conversation_id: str) -> dict:
 
 
 def format_confirmation_message(slot_label: str, attendee_name: str) -> str:
-    name = attendee_name.split()[0] if attendee_name else "there"
-    return (
-        f"Perfect, {name}! You're booked for {slot_label}. "
-        f"You'll receive a calendar invite shortly. Looking forward to speaking with you!"
-    )
+    return "Thank you, the meeting is booked. Ending conversation."
+
