@@ -8,7 +8,7 @@ async def test_query_flow():
     # Step 1: Generate a test embedding
     print("Step 1: Generating embedding for test query...")
     try:
-        emb = await embed_text("What is ANNIE?")
+        emb = await embed_text("What is AVOR?")
         print(f"  Embedding generated: len={len(emb)}, first_5={emb[:5]}")
         print(f"  All zeros? {all(v == 0 for v in emb)}")
         print(f"  Embedding dim: {len(emb)}")

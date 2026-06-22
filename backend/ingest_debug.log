@@ -1,11 +1,11 @@
---- /admin/upload endpoint hit, filename=ANNIE.docx ---
+--- /admin/upload endpoint hit, filename=AVOR.docx ---
 Read 33029 bytes from uploaded file
-=== ingest_document called for 'ANNIE.docx' (33029 bytes) ===
+=== ingest_document called for 'AVOR.docx' (33029 bytes) ===
 Extracted text length: 20382
 Split into 52 chunks
 Generated 52 embeddings, dim=1536
 Prepared 52 rows for insert
-Deleted old chunks for source_file='ANNIE.docx'
+Deleted old chunks for source_file='AVOR.docx'
 Supabase batch 1: inserted 20/20 rows
 Supabase batch 2: inserted 20/20 rows
 Supabase batch 3: inserted 12/12 rows

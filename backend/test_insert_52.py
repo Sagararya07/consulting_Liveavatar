@@ -7,7 +7,7 @@ for i in range(52):
     rows.append({
         "content": f"Test chunk {i}",
         "embedding": [0.1] * 1536,
-        "source_file": "ANNIE_simulated.docx"
+        "source_file": "AVOR_simulated.docx"
     })
 
 try:

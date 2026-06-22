@@ -46,13 +46,13 @@ if res.data:
     sources = set(r["source_file"] for r in res.data)
     print(f"\nDistinct source files: {sources}")
 
-# 5. Check if the embedding column has the right data for ANNIE rows
-print("\n--- Checking ANNIE.docx rows specifically ---")
-res = supabase.table("knowledge_chunks").select("id, embedding").eq("source_file", "ANNIE.docx").limit(1).execute()
+# 5. Check if the embedding column has the right data for AVOR rows
+print("\n--- Checking AVOR.docx rows specifically ---")
+res = supabase.table("knowledge_chunks").select("id, embedding").eq("source_file", "AVOR.docx").limit(1).execute()
 if res.data:
     emb = res.data[0].get("embedding")
     if emb is None:
-        print("PROBLEM: embedding is NULL for ANNIE.docx rows!")
+        print("PROBLEM: embedding is NULL for AVOR.docx rows!")
     elif isinstance(emb, str):
         print(f"Embedding is a STRING (len={len(emb)}): {emb[:100]}")
     elif isinstance(emb, list):
@@ -61,4 +61,4 @@ if res.data:
         zeros = sum(1 for v in emb if v == 0.0)
         print(f"  Zero values: {zeros} out of {len(emb)}")
 else:
-    print("No ANNIE.docx rows found")
+    print("No AVOR.docx rows found")

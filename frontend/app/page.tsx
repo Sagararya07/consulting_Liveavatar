@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AvatarConsultant from "./components/AvatarConsultant";
+import TextChatWidget from "./components/TextChatWidget";
 import { useAuth } from "./lib/AuthContext";
 
 export default function Home() {
@@ -23,5 +24,10 @@ export default function Home() {
     );
   }
 
-  return <AvatarConsultant />;
+  return (
+    <>
+      <AvatarConsultant />
+      <TextChatWidget />
+    </>
+  );
 }
