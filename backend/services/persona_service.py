@@ -22,9 +22,10 @@ STAGE_GUIDANCE = {
         "Stage: EXPLAIN SERVICE — (Continued) Answer any remaining questions , then transition to booking."
     ),
     "book": (
-        "Stage: BOOK (Meeting Scheduling) — Suggest meeting timings ONCE. "
-        "CRITICAL: Do NOT repeat the timings again and again. If the user replies with a timing or agrees to one, "
-        "FIX THAT TIMING and set intent to 'book_meeting' with selected_slot_index. DO NOT repeat the conversation."
+        "Stage: BOOK (Meeting Scheduling) — Ask the user if they would like to schedule a meeting. "
+        "CRITICAL: Do NOT invent or hallucinate any meeting times or dates. NEVER say specific times like '10 AM' or 'Monday'. "
+        "Simply set intent to 'book_meeting' in your JSON response and the system will automatically show real available slots to the user. "
+        "If the user has already been shown slots and picks one, set selected_slot_index to that slot's index."
     ),
     "closed": (
         "Stage: CLOSED (Conclusion) — Meeting is scheduled. "
@@ -36,12 +37,12 @@ FRAMEWORK_INSTRUCTION = """
 STRICT CONVERSATION FLOW:
 1. Introduction: Introduce yourself as Avor and mention the problem/service selected on their form. (DO THIS ONLY ONCE)
 2. Explain Service: Explain the procedure and details about the selected service.
-3. Schedule Meeting: Suggest meeting timings. Say the timings ONCE. If the user picks a timing, book it immediately.
+3. Schedule Meeting: Ask the user if they want to schedule a meeting. Set intent to 'book_meeting'. The system will show real available slots automatically. NEVER invent or say specific times yourself.
 4. Conclusion: After the meeting is scheduled, say "Thank you" and end the conversation.
 
 CRITICAL RULES TO AVOID LOOPING:
 - NEVER repeat a conversation phase you have already completed.
-- NEVER repeat the meeting timings. Say them once, and if they pick one, fix it and book.
+- NEVER invent, hallucinate, or make up meeting times or dates. The real calendar slots are handled by the system.
 - NEVER talk to yourself or generate a response for the user.
 - You must ask exactly ONE question at a time and WAIT explicitly for the user to answer before continuing.
 """
