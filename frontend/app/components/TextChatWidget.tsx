@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "../lib/AuthContext";
-import { askQuery, getSettings, bookMeeting, initSession, type MeetingSlot } from "../lib/api";
+import { askQuery, bookMeeting, initSession, type MeetingSlot } from "../lib/api";
 
 export default function TextChatWidget() {
   const { user, token } = useAuth();
@@ -46,23 +46,33 @@ export default function TextChatWidget() {
     }
   };
 
-  // Initialize intro message
+  // Auto-trigger the AI introduction when chat opens (no static greeting)
   useEffect(() => {
-    if (isOpen && messages.length === 0 && conversationId.current) {
-       const loadIntro = async () => {
+    if (isOpen && messages.length === 0 && conversationId.current && user && token) {
+       const triggerIntro = async () => {
+         setLoading(true);
          try {
-           const settings = await getSettings();
-           let intro = settings.avatar_intro || "Hello, how can I help you today?";
-           intro = intro.replace("{user_name}", user?.name || "there");
-           intro = intro.replace("{avatar_name}", settings.avatar_name || "Avor");
-           setMessages([{role: "avatar", text: intro}]);
+           const result = await askQuery(
+             user.id,
+             "hello",
+             "multi",
+             conversationId.current || undefined,
+             token,
+             Intl.DateTimeFormat().resolvedOptions().timeZone
+           );
+           if (result.conversation_id) {
+             conversationId.current = result.conversation_id;
+           }
+           setMessages([{role: "avatar", text: result.answer}]);
          } catch (e) {
-           setMessages([{role: "avatar", text: `Hello ${user?.name || ''}, how may I assist you?`}]);
+           setMessages([{role: "avatar", text: "Hello! I'm Avor, your AI consultant. How can I help you today?"}]);
+         } finally {
+           setLoading(false);
          }
        };
-       loadIntro();
+       triggerIntro();
     }
-  }, [isOpen, messages.length, user]);
+  }, [isOpen, messages.length, user, token]);
 
   useEffect(() => {
     if (messagesEndRef.current) {
