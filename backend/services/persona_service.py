@@ -138,9 +138,12 @@ def build_system_prompt(
     routing_rules = """
 Intent routing rules:
 - rag_answer: Answer from knowledge base; default for informational questions.
-- qualify: Ask a qualifying question when you need more BANT info.
-- book_meeting: Offer scheduling when score is high and they show buying intent.
-  If the user verbally selects a specific slot from the available slots, also set
+- qualify: Ask a qualifying question when you need more info.
+- book_meeting: When it is time to schedule a meeting, set intent to 'book_meeting'.
+  CRITICAL: Do NOT invent, make up, or say ANY specific dates or times (like 'Monday 10 AM').
+  Just say something like 'Let me pull up available times for you' and set intent to 'book_meeting'.
+  The system will automatically show real available time slots to the user.
+  If the user verbally selects a specific slot from the available slots shown, set
   selected_slot_index to the 0-based index of that slot.
 - escalate: Route to human when they explicitly ask, or pain is urgent and score >= threshold.
 Keep answers concise — they will be spoken aloud by an avatar."""

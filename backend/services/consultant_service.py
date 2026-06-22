@@ -158,6 +158,18 @@ async def process_turn(
     conv_state = get_or_create_state(conversation_id)
     meeting_booked = lead.get("status") == "booked"
 
+    # ── SHORT-CIRCUIT: If meeting is already booked, end immediately ──
+    if meeting_booked or lead.get("stage") == "closed":
+        result = ConsultantTurnResult(
+            answer="Thank you, the meeting is already booked. Our team will reach out to you soon. Have a great day!",
+            intent="rag_answer",
+            lead_score=int(lead.get("score") or 0),
+            stage="closed",
+            status=lead.get("status") or "booked",
+            score_delta=0,
+        )
+        return _finalize(conversation_id, start_time, result, lead)
+
     current_score = int(lead.get("score") or 0)
     current_stage = lead.get("stage") or "discover"
     current_status = lead.get("status") or "cold"
